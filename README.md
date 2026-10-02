@@ -40,7 +40,15 @@ Brandki 是一个「像背单词一样背品牌」的间隔重复记忆应用：
 - **macOS**：若提示「无法验证开发者」，**右键 app → 打开 → 打开**；之后可正常双击。
 - **Windows**：若弹出 SmartScreen，点「更多信息 → 仍要运行」。
 
-<img width="840" height="1814" alt="3568b6a8d1062d4354f3e36dfa7ce291" src="https://github.com/user-attachments/assets/0758160e-a633-4a4b-8271-d224ac731183" />
+<table>
+  <tr>
+    <td><img width="200" src="https://github.com/user-attachments/assets/0758160e-a633-4a4b-8271-d224ac731183" /></td>
+    <td><img width="200" src="https://github.com/user-attachments/assets/a14e6e95-d8d3-44d3-a4c1-6a4c2b9e9e33" /></td>
+    <td><img width="200" src="https://github.com/user-attachments/assets/c8874c8f-c26b-44c9-95be-7cf8500c74a2" /></td>
+    <td><img width="200" src="https://github.com/user-attachments/assets/8fafe8fc-5b46-48db-8886-7d08c59a91ee" /></td>
+  </tr>
+</table>
+
 
 ### 存档位置（桌面版）
 
