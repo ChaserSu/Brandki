@@ -1,0 +1,113 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-paper: #f7f3ec;
+  --color-paper-deep: #efe8dc;
+  --color-ink: #1c1917;
+  --color-ink-soft: #57534e;
+  --color-brand: #0f5132;
+  --color-brand-soft: #dcebe2;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Segoe UI', sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+/* 3D 翻转卡片 */
+.flip-scene {
+  perspective: 1600px;
+}
+.flip-inner {
+  transform-style: preserve-3d;
+  transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.flip-inner.flipped {
+  transform: rotateY(180deg);
+}
+.flip-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flip-back {
+  transform: rotateY(180deg);
+}
+
+/* 卡片内 Anki 模板内容 */
+.anki-content {
+  height: 100%;
+}
+.anki-content img {
+  max-width: 100%;
+  width: auto;
+  height: auto;
+  margin-inline: auto;
+  border-radius: 0.75rem;
+}
+/* 正面：图片在整个卡片区内等比缩放到完整可见 */
+.anki-content .front {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.anki-content .front img {
+  max-height: 100%;
+  object-fit: contain;
+}
+/* 背面：图片在上、文字可滚动，图片不与文字抢空间 */
+.flip-back .anki-content {
+  overflow-y: auto;
+}
+.flip-back .anki-content .front {
+  height: auto;
+  max-height: 42vh;
+  margin-bottom: 0.25rem;
+}
+.flip-back .anki-content .front img {
+  max-height: 42vh;
+}
+.anki-content .extra {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.625rem 0;
+  border-bottom: 1px solid #e7e0d4;
+  font-size: 0.95rem;
+}
+.anki-content .extra:last-of-type {
+  border-bottom: none;
+}
+.anki-content .lbl {
+  color: var(--color-ink-soft);
+  white-space: nowrap;
+}
+.anki-content hr#answer {
+  border: none;
+  border-top: 1px dashed #d6cdbd;
+  margin: 1rem 0;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.35s ease both;
+}
