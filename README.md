@@ -49,9 +49,9 @@ Brandki 是一个「像背单词一样背品牌」的间隔重复记忆应用：
 <table>
   <tr>
     <td><img width="200" src="https://github.com/user-attachments/assets/0758160e-a633-4a4b-8271-d224ac731183" /></td>
-    <td><img width="200" src="https://github.com/user-attachments/assets/a14e6e95-d8d3-44d3-a4c1-6a4c2b9e9e33" /></td>
+    <td><img width="200" src="https://github.com/user-attachments/assets/f980370c-a8d4-43ba-b070-dc1c3ec0bf5a" /></td>
     <td><img width="200" src="https://github.com/user-attachments/assets/c8874c8f-c26b-44c9-95be-7cf8500c74a2" /></td>
-    <td><img width="200" src="https://github.com/user-attachments/assets/8fafe8fc-5b46-48db-8886-7d08c59a91ee" /></td>
+    <td><img width="200" src="https://github.com/user-attachments/assets/f0601485-881e-495c-a6b3-dd658f02e7b5" /></td>
   </tr>
 </table>
 
