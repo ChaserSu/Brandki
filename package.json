@@ -10,8 +10,7 @@
     "preview": "vite preview",
     "app:dev": "vite --port 5180 & sleep 2 && VITE_DEV_SERVER_URL=http://localhost:5180 electron .",
     "app:build": "npm run build && NODE_TLS_REJECT_UNAUTHORIZED=0 electron-builder --mac dir",
-    "app:dmg": "npm run build && NODE_TLS_REJECT_UNAUTHORIZED=0 electron-builder --mac dmg",
-    "app:build:win": "npm run build && NODE_TLS_REJECT_UNAUTHORIZED=0 electron-builder --win nsis portable --x64 --arm64"
+    "app:build:win": "npm run build && NODE_TLS_REJECT_UNAUTHORIZED=0 electron-builder --win portable --x64"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -56,27 +55,12 @@
       "icon": "build/icon.png",
       "target": [
         {
-          "target": "nsis",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        },
-        {
           "target": "portable",
           "arch": [
-            "x64",
-            "arm64"
+            "x64"
           ]
         }
       ]
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
-      "artifactName": "Brandki-Setup-${version}-${arch}.exe",
-      "deleteAppDataOnUninstall": false
     },
     "portable": {
       "artifactName": "Brandki-Portable-${version}-${arch}.exe"

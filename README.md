@@ -8,7 +8,7 @@ Brandki 是一个「像背单词一样背品牌」的间隔重复记忆应用：
 - 🌐 **Web 演示版**（Vite 静态站，存档走浏览器 OPFS 私有目录）
 - 📦 可解析标准 Anki `.apkg`（含模板、媒体、学习快照），也支持导出自有 `.apkg` 备份
 
-> 当前版本：**v0.2.0**。下载见 [Releases](https://github.com/ChaserSu/Brandki/releases/latest)。
+> 当前版本：**v0.2.5**。下载见 [Releases](https://github.com/ChaserSu/Brandki/releases/latest)。
 
 ## 功能
 
@@ -36,10 +36,8 @@ Brandki 是一个「像背单词一样背品牌」的间隔重复记忆应用：
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS (Apple Silicon) | `Brandki-0.2.0-mac-arm64.zip` | 解压后把 `Brandki.app` 拖入「应用程序」 |
-| Windows x64（绝大多数电脑） | `Brandki-Setup-0.2.0-x64.exe` | 安装版，不需管理员权限 |
-| Windows ARM64（骁龙本等） | `Brandki-Setup-0.2.0-arm64.exe` | 安装版 |
-| Windows x64 免安装 | `Brandki-Portable-0.2.0-x64.exe` | 单文件绿色版，U 盘可带 |
+| macOS (Apple Silicon) | `Brandki-0.2.5-mac-arm64.zip` | 解压后把 `Brandki.app` 拖入「应用程序」 |
+| Windows x64 免安装 | `Brandki-Portable-0.2.5-x64.exe` | 单文件绿色版，U 盘可带 |
 
 未做苹果公证 / Windows 代码签名（自签名分发）：
 
