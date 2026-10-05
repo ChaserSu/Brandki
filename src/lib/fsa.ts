@@ -95,6 +95,39 @@ export async function listFiles(root: AnyFS, path: string[]): Promise<string[]> 
   return names
 }
 
+/** 列出某目录下的子目录名 */
+export async function listDirs(root: AnyFS, path: string[]): Promise<string[]> {
+  if (native) return native.listDirs(path)
+  let dir: AnyFS = root
+  for (const seg of path) {
+    dir = await getDir(dir, seg)
+    if (!dir) return []
+  }
+  const names: string[] = []
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind === 'directory') names.push(name)
+  }
+  return names
+}
+
+/** 删除单个文件（不存在视为成功）。路径目录必须存在 */
+export async function deleteFile(root: AnyFS, path: string[]): Promise<void> {
+  if (native) {
+    await native.deleteFile(path)
+    return
+  }
+  let dir: AnyFS = root
+  for (const seg of path.slice(0, -1)) {
+    dir = await getDir(dir, seg)
+    if (!dir) return
+  }
+  try {
+    await dir.removeEntry(path[path.length - 1])
+  } catch {
+    // 文件已不存在：忽略
+  }
+}
+
 /** 以 Blob 形式读文件（媒体用） */
 export async function readBlob(root: AnyFS, path: string[]): Promise<Blob | null> {
   if (native) {

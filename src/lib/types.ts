@@ -71,6 +71,21 @@ export interface ProgressFile {
   mastered: Record<string, { at: string }>
 }
 
+/** AI 接口协议：OpenAI 兼容（/chat/completions）或 Anthropic（/v1/messages） */
+export type AIProtocol = 'openai' | 'anthropic'
+
+/** AI 自动补全配置（apiKey 仅保存在本地存档中，不上传任何服务器） */
+export interface AISettings {
+  protocol: AIProtocol
+  apiKey: string
+  /** OpenAI 兼容填到 /v1 一级，如 https://api.openai.com/v1；Anthropic 填域名，如 https://api.anthropic.com */
+  baseUrl: string
+  /** 必须是支持图像输入的多模态模型，如 gpt-4o-mini、claude-3-5-sonnet-latest、MiMo v2.6 flash */
+  model: string
+  /** 自定义提示词模板；为空则使用内置默认模板。可用变量见 ai.ts#DEFAULT_AI_PROMPT */
+  promptTemplate?: string
+}
+
 /** settings.json */
 export interface SettingsFile {
   version: 1
@@ -79,6 +94,10 @@ export interface SettingsFile {
   welcomed: boolean
   /** 每轮自由学习一次性学习的卡片数 */
   batchSize: number
+  /** AI 自动补全配置（未配置时为 null） */
+  ai: AISettings | null
+  /** 已执行过压缩的媒体（key 形如 `${deckId}/${媒体文件名}`），避免重复压缩 */
+  compressedMediaKeys?: string[]
 }
 
 export type MergeStrategy = 'old' | 'new' | 'merge-old' | 'merge-new'

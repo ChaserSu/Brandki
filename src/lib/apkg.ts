@@ -57,7 +57,7 @@ function parseBrandkiZip(entries: Record<string, Uint8Array>): ImportedDeck {
 
 /** 把 Anki 的传统调度数据近似映射为 FSRS 卡片状态（快照级，非无损） */
 function ankiSnapshotToState(c: RawCard, crt: number): unknown | null {
-  if (c.type === 0 || c.ivl <= 0) return null
+  if (c.type === 0) return null // 新卡：没有调度状态
   if (c.type === 2) {
     // review：due 是相对收藏创建日的天数
     const dueDate = new Date(crt * 1000 + c.due * 86400_000)
@@ -74,9 +74,9 @@ function ankiSnapshotToState(c: RawCard, crt: number): unknown | null {
       last_review: null,
     }
   }
-  // 学习中/重学：视为即刻到期
+  // 学习中/重学（type 1/3）：due 是 Unix 秒时间戳，ivl 恒为 0
   return {
-    due: new Date().toISOString(),
+    due: (c.due > 0 ? new Date(c.due * 1000) : new Date()).toISOString(),
     stability: 0,
     difficulty: 5,
     elapsed_days: 0,
@@ -280,6 +280,276 @@ export async function buildBackup(
   for (const [name, data] of media) {
     files[`library/${deck.id}/media/${name}`] = data
   }
+  return new Blob([zipSync(files, { level: 6 })], { type: 'application/zip' })
+}
+
+// ---------- 导出 apkg（有损：仅供导入 Anki 等兼容软件） ----------
+
+/** Anki collection.anki2 建表语句（对齐 Anki 2.1 legacy schema） */
+const APKG_SCHEMA = `
+CREATE TABLE col (
+  id integer primary key, crt integer not null, mod integer not null, scm integer not null,
+  ver integer not null, dty integer not null, usn integer not null, ls integer not null,
+  conf text not null, models text not null, decks text not null, dconf text not null, tags text not null
+);
+CREATE TABLE notes (
+  id integer primary key, guid text not null, mid integer not null, mod integer not null,
+  usn integer not null, tags text not null, flds text not null, sfld integer not null,
+  csum integer not null, flags integer not null, data text not null
+);
+CREATE TABLE cards (
+  id integer primary key, nid integer not null, did integer not null, ord integer not null,
+  mod integer not null, usn integer not null, type integer not null, queue integer not null,
+  due integer not null, ivl integer not null, factor integer not null, reps integer not null,
+  lapses integer not null, left integer not null, odue integer not null, odid integer not null,
+  flags integer not null, data text not null
+);
+CREATE TABLE revlog (
+  id integer primary key, cid integer not null, usn integer not null, ease integer not null,
+  ivl integer not null, lastIvl integer not null, factor integer not null, time integer not null,
+  type integer not null
+);
+CREATE TABLE graves ( usn integer not null, oid integer not null, type integer not null );
+`
+
+/** 极简 SHA-1（40 位十六进制），用于生成 Anki 的 notes.csum */
+function sha1Hex(input: Uint8Array): string {
+  const ml = input.length * 8
+  const padded = new Uint8Array((((input.length + 8) >> 6) + 1) << 6)
+  padded.set(input)
+  padded[input.length] = 0x80
+  const dv = new DataView(padded.buffer)
+  dv.setUint32(padded.length - 8, Math.floor(ml / 0x100000000), false)
+  dv.setUint32(padded.length - 4, ml >>> 0, false)
+
+  let h0 = 0x67452301, h1 = 0xefcdab89, h2 = 0x98badcfe, h3 = 0x10325476, h4 = 0xc3d2e1f0
+  const w = new Uint32Array(80)
+  for (let i = 0; i < padded.length; i += 64) {
+    for (let j = 0; j < 16; j++) w[j] = dv.getUint32(i + j * 4, false)
+    for (let j = 16; j < 80; j++) {
+      const v = w[j - 3] ^ w[j - 8] ^ w[j - 14] ^ w[j - 16]
+      w[j] = (v << 1) | (v >>> 31)
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4
+    for (let j = 0; j < 80; j++) {
+      let f: number, k: number
+      if (j < 20) { f = (b & c) | (~b & d); k = 0x5a827999 }
+      else if (j < 40) { f = b ^ c ^ d; k = 0x6ed9eba1 }
+      else if (j < 60) { f = (b & c) | (b & d) | (c & d); k = 0x8f1bbcdc }
+      else { f = b ^ c ^ d; k = 0xca62c1d6 }
+      const t = (((a << 5) | (a >>> 27)) + f + e + k + w[j]) >>> 0
+      e = d; d = c; c = (b << 30) | (b >>> 2); b = a; a = t
+    }
+    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0; h4 = (h4 + e) >>> 0
+  }
+  return [h0, h1, h2, h3, h4].map((x) => x.toString(16).padStart(8, '0')).join('')
+}
+
+/** 去掉 HTML 标签，得到 Anki 排序字段用的纯文本 */
+function stripForSort(html: string): string {
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
+}
+
+interface AnkiSched {
+  type: number
+  queue: number
+  due: number
+  ivl: number
+  factor: number
+  reps: number
+  lapses: number
+  left: number
+}
+
+/**
+ * FSRS 状态 → Anki 卡片调度字段（近似映射，与 ankiSnapshotToState 方向相反）。
+ * 新卡 type=0/queue=0、due 为排队序号；学习/重学 type=1/3、due 为 Unix 秒；
+ * 复习 type=2/queue=2、due 为相对收藏创建日的天数。
+ */
+function fsrsToAnkiSched(raw: unknown, crtSec: number, position: number): AnkiSched {
+  const s = (raw ?? null) as {
+    due?: string | Date
+    difficulty?: number
+    scheduled_days?: number
+    reps?: number
+    lapses?: number
+    state?: number
+  } | null
+  if (!s || !s.state) {
+    return { type: 0, queue: 0, due: position, ivl: 0, factor: 2500, reps: 0, lapses: 0, left: 0 }
+  }
+  const reps = Math.max(0, Math.round(s.reps ?? 0))
+  const lapses = Math.max(0, Math.round(s.lapses ?? 0))
+  const dueMs = s.due ? new Date(s.due).getTime() : Date.now()
+  if (s.state === 2) {
+    const ivl = Math.max(1, Math.round(s.scheduled_days ?? 0))
+    const diff = Math.min(10, Math.max(1, s.difficulty ?? 5))
+    const factor = Math.round(Math.min(3000, Math.max(1300, 15000 / diff)))
+    return { type: 2, queue: 2, due: Math.floor((dueMs - crtSec * 1000) / 86400_000), ivl, factor, reps, lapses, left: 0 }
+  }
+  const type = s.state === 3 ? 3 : 1
+  return { type, queue: type, due: Math.floor(dueMs / 1000), ivl: 0, factor: 2500, reps, lapses, left: 0 }
+}
+
+/**
+ * 打包为标准 .apkg（Anki 牌组包），可导入 Anki 及兼容软件。
+ * 注意：这是有损导出——卡片内容与图片完整保留，但学习进度只能近似转换为 Anki
+ * 的传统调度字段（FSRS 记忆状态无法无损还原）；卡片 id / 笔记 guid 也会重新编号。
+ * 若要在 Brandki 之间迁移，请用 buildBackup（.brandki.zip，无损）。
+ */
+export async function buildApkg(
+  deck: DeckFile,
+  media: Map<string, Uint8Array>,
+  progress: ProgressFile,
+): Promise<Blob> {
+  const wasm = await resolveWasmUrl()
+  const SQL = await initSqlJs({ locateFile: () => wasm })
+  const db = new SQL.Database()
+  db.run(APKG_SCHEMA)
+
+  const nowSec = Math.floor(Date.now() / 1000)
+
+  // 模型 id / 牌组 id 映射（Anki 要求整型 id）
+  const modelIdByKey = new Map<string, number>()
+  let modelSeq = 1700000000000
+  for (const key of Object.keys(deck.models)) modelIdByKey.set(key, modelSeq++)
+
+  const deckIdByPath = new Map<string, number>()
+  let deckSeq = 1700000000100
+  deckIdByPath.set('Default', 1)
+  for (const c of deck.cards) {
+    const p = c.deckPath?.trim() || 'Default'
+    if (!deckIdByPath.has(p)) deckIdByPath.set(p, deckSeq++)
+  }
+
+  const modelsJson: Record<string, unknown> = {}
+  /** 每个模型用于 Anki 排序的字段下标（Front 是图片，跳过它取第一个文字字段） */
+  const sortfByKey = new Map<string, number>()
+  for (const [key, m] of Object.entries(deck.models)) {
+    const mid = modelIdByKey.get(key)!
+    const orderedFlds = [...m.flds].sort((a, b) => a.ord - b.ord)
+    const sortf = Math.max(0, orderedFlds.findIndex((f) => f.name !== 'Front'))
+    sortfByKey.set(key, sortf)
+    modelsJson[String(mid)] = {
+      id: mid,
+      name: m.name,
+      type: 0,
+      mod: nowSec,
+      usn: -1,
+      sortf,
+      did: 1,
+      tmpls: [...m.tmpls].sort((a, b) => a.ord - b.ord).map((t) => ({
+        name: t.name, ord: t.ord, qfmt: t.qfmt, afmt: t.afmt,
+        bqfmt: '', bafmt: '', did: null, bfont: '', bsize: 0,
+      })),
+      flds: orderedFlds.map((f) => ({
+        name: f.name, ord: f.ord, font: 'Arial', size: 20, sticky: false, media: [],
+      })),
+      css: m.css ?? '',
+      latexPre: '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n',
+      latexPost: '\\end{document}',
+      req: [[0, 'any', [0]]],
+      tags: [],
+      vers: [],
+    }
+  }
+
+  const deckBase = {
+    mod: nowSec, usn: -1,
+    lrnToday: [0, 0], revToday: [0, 0], newToday: [0, 0], timeToday: [0, 0],
+    conf: 1, desc: '', dyn: 0, collapsed: false, extendNew: 10, extendRev: 50, browserCollapsed: false,
+  }
+  const decksJson: Record<string, unknown> = { '1': { id: 1, name: 'Default', ...deckBase } }
+  for (const [path, id] of deckIdByPath) {
+    if (id === 1) continue
+    decksJson[String(id)] = { id, name: path, ...deckBase }
+  }
+
+  const conf = {
+    nextPos: 1, estTimes: true, activeDecks: [1], sortType: 'noteFld', timeLim: 0,
+    sortBackwards: false, addToCur: true, curDeck: 1, newBury: true, newSpread: 0,
+    dueCounts: true, curModel: null, collapseTime: 1200,
+  }
+  const dconf = {
+    '1': {
+      id: 1, name: 'Default', mod: 0, usn: -1, maxTaken: 60, autoplay: true, timer: 0, replayq: true,
+      new: { bury: true, delays: [1, 10], initialFactor: 2500, ints: [1, 4, 7], order: 1, perDay: 20, separate: true },
+      rev: { bury: true, ease4: 1.3, fuzz: 0.05, ivlFct: 1, maxIvl: 36500, perDay: 200, hardFactor: 1.2 },
+      lapse: { delays: [10], leechAction: 0, leechFails: 8, minInt: 1, mult: 0 },
+      dyn: false, collapseTime: 1200, newMix: 0, newPerDayMinimum: 0, relearnSteps: 1, learnSteps: 1,
+    },
+  }
+
+  db.run('INSERT INTO col VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+    1, nowSec, nowSec, nowSec, 11, 0, 0, 0,
+    JSON.stringify(conf), JSON.stringify(modelsJson), JSON.stringify(decksJson), JSON.stringify(dconf), '{}',
+  ])
+
+  // 笔记
+  const noteIdByGuid = new Map<string, number>()
+  let noteSeq = 1700000000000
+  const insertNote = db.prepare('INSERT INTO notes VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+  for (const n of deck.notes) {
+    const mid = modelIdByKey.get(n.mid)
+    const model = deck.models[n.mid]
+    if (!mid || !model) continue
+    const nid = noteSeq++
+    noteIdByGuid.set(n.guid, nid)
+    const ordered = [...model.flds].sort((a, b) => a.ord - b.ord)
+    const flds = ordered.map((f) => n.fields[f.name] ?? '').join('\x1f')
+    const sortField = ordered[sortfByKey.get(n.mid) ?? 0]
+    const sfld = stripForSort(sortField ? (n.fields[sortField.name] ?? '') : '')
+    const csum = parseInt(sha1Hex(new TextEncoder().encode(sfld)).slice(0, 8), 16) || 0
+    const tags = n.tags.length ? ` ${n.tags.join(' ')} ` : ''
+    insertNote.run([nid, n.guid, mid, nowSec, -1, tags, flds, sfld, csum, 0, ''])
+  }
+  insertNote.free()
+
+  // 卡片
+  const cardIdByKey = new Map<string, number>()
+  let cardSeq = 1700000000000
+  let newPos = 1
+  const insertCard = db.prepare('INSERT INTO cards VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+  for (const c of deck.cards) {
+    const nid = noteIdByGuid.get(c.guid)
+    if (!nid) continue
+    const did = deckIdByPath.get(c.deckPath?.trim() || 'Default') ?? 1
+    const sched = fsrsToAnkiSched(progress.states[c.id], nowSec, newPos)
+    if (sched.type === 0) newPos++
+    const cid = cardSeq++
+    cardIdByKey.set(c.id, cid)
+    insertCard.run([
+      cid, nid, did, c.ord, nowSec, -1, sched.type, sched.queue, sched.due,
+      sched.ivl, sched.factor, sched.reps, sched.lapses, sched.left, 0, 0, 0, '',
+    ])
+  }
+  insertCard.free()
+
+  // 复习日志（近似）
+  const insertLog = db.prepare('INSERT INTO revlog VALUES (?,?,?,?,?,?,?,?,?)')
+  let revSeq = Date.now()
+  for (const log of progress.logs) {
+    const cid = cardIdByKey.get(log.cardId)
+    if (!cid) continue
+    const type = log.state === 2 ? 1 : log.state === 3 ? 2 : 0
+    insertLog.run([revSeq++, cid, -1, log.rating, Math.round(log.scheduledDays ?? 0), 0, 2500, 0, type])
+  }
+  insertLog.free()
+
+  const dbBytes = db.export()
+  db.close()
+
+  // 媒体：{ "0": "真实文件名", ... } + 以编号命名的文件
+  const files: Record<string, Uint8Array> = { 'collection.anki2': dbBytes }
+  const mediaMap: Record<string, string> = {}
+  let idx = 0
+  for (const [name, data] of media) {
+    mediaMap[String(idx)] = name
+    files[String(idx)] = data
+    idx++
+  }
+  files['media'] = strToU8(JSON.stringify(mediaMap))
+
   return new Blob([zipSync(files, { level: 6 })], { type: 'application/zip' })
 }
 

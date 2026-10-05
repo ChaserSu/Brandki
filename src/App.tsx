@@ -4,13 +4,18 @@ import { Home, type StudyConfig } from './components/Home'
 import { Study } from './components/Study'
 import { Browse } from './components/Browse'
 import { Settings } from './components/Settings'
+import { Entry } from './components/Entry'
+import { BatchEntry } from './components/BatchEntry'
+import { CardEdit } from './components/CardEdit'
+import { AIPromptEditor } from './components/AIPromptEditor'
 import { Welcome } from './components/Welcome'
 
-type View = 'home' | 'browse' | 'settings'
+type View = 'home' | 'browse' | 'settings' | 'entry' | 'batchentry' | 'aiprompt' | 'edit'
 
 export default function App() {
   const { status, supported } = useStore()
   const [view, setView] = useState<View>('home')
+  const [editingCardId, setEditingCardId] = useState<string | null>(null)
   const [studyCfg, setStudyCfg] = useState<StudyConfig | null>(null)
   // 每次启动都先展示欢迎页
   const [showWelcome, setShowWelcome] = useState(true)
@@ -54,10 +59,34 @@ export default function App() {
   return (
     <div className="min-h-full">
       {view === 'home' && (
-        <Home onStudy={(cfg) => setStudyCfg(cfg)} onBrowse={() => setView('browse')} onSettings={() => setView('settings')} />
+        <Home
+          onStudy={(cfg) => setStudyCfg(cfg)}
+          onBrowse={() => setView('browse')}
+          onSettings={() => setView('settings')}
+          onEntry={() => setView('entry')}
+          onBatchEntry={() => setView('batchentry')}
+        />
       )}
-      {view === 'browse' && <Browse onBack={() => setView('home')} />}
-      {view === 'settings' && <Settings onBack={() => setView('home')} />}
+      {view === 'browse' && (
+        <Browse
+          onBack={() => setView('home')}
+          onEditCard={(id) => {
+            setEditingCardId(id)
+            setView('edit')
+          }}
+        />
+      )}
+      {view === 'settings' && (
+        <Settings onBack={() => setView('home')} onEditPrompt={() => setView('aiprompt')} />
+      )}
+      {view === 'entry' && <Entry onBack={() => setView('home')} onSettings={() => setView('settings')} />}
+      {view === 'batchentry' && (
+        <BatchEntry onBack={() => setView('home')} onSettings={() => setView('settings')} />
+      )}
+      {view === 'aiprompt' && <AIPromptEditor onBack={() => setView('settings')} />}
+      {view === 'edit' && editingCardId && (
+        <CardEdit cardId={editingCardId} onBack={() => setView('browse')} onSettings={() => setView('settings')} />
+      )}
     </div>
   )
 }

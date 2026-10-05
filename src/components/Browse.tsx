@@ -3,7 +3,7 @@ import { useStore } from '../lib/store'
 import { getState, isMastered, type Grade } from '../lib/srs'
 import { buildCategoryTree, cardInCategory, displayName, flattenTree, segmentsOf, stripHtml } from '../lib/categories'
 import { renderBack, renderFront, remapMedia } from '../lib/template'
-import { Badge, Button, Card, Modal } from './ui'
+import { Badge, Button, Card, ConfirmDialog, Modal } from './ui'
 import { cn } from '../lib/utils'
 import type { BrandkiCard } from '../lib/types'
 
@@ -48,14 +48,15 @@ function statusOf(card: BrandkiCard, progress: ReturnType<typeof useStore>['prog
   return { key: 'review', label: '复习', cls: 'bg-red-50 text-[#b42318]' }
 }
 
-export function Browse({ onBack }: { onBack: () => void }) {
-  const { deck, progress, mediaUrls, batchSetStatus } = useStore()
+export function Browse({ onBack, onEditCard }: { onBack: () => void; onEditCard: (cardId: string) => void }) {
+  const { deck, progress, mediaUrls, batchSetStatus, deleteCards } = useStore()
   const [query, setQuery] = useState('')
   const [groupBy, setGroupBy] = useState<GroupBy>('category')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [preview, setPreview] = useState<BrandkiCard | null>(null)
   const [busy, setBusy] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string[] | null>(null)
 
   const cards = deck?.cards ?? []
 
@@ -123,6 +124,25 @@ export function Browse({ onBack }: { onBack: () => void }) {
     await batchSetStatus([...selected], status)
     setSelected(new Set())
     setBusy(false)
+  }
+
+  /** 执行删除（单卡与批量共用）：清空选中、关掉正在预览的卡 */
+  const runDelete = async () => {
+    const ids = confirmDelete ?? []
+    setConfirmDelete(null)
+    if (ids.length === 0) return
+    setBusy(true)
+    try {
+      await deleteCards(ids)
+      setSelected((prev) => {
+        const next = new Set(prev)
+        ids.forEach((id) => next.delete(id))
+        return next
+      })
+      setPreview((p) => (p && ids.includes(p.id) ? null : p))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const tree = useMemo(() => (deck ? buildCategoryTree(deck.cards) : null), [deck])
@@ -232,6 +252,7 @@ export function Browse({ onBack }: { onBack: () => void }) {
                     status={statusOf(card, progress)}
                     onToggle={() => toggle(card.id)}
                     onPreview={() => setPreview(card)}
+                    onDelete={() => setConfirmDelete([card.id])}
                   />
                 ))}
               </div>
@@ -261,13 +282,41 @@ export function Browse({ onBack }: { onBack: () => void }) {
               </button>
             ))}
           </div>
+          <button
+            disabled={busy}
+            onClick={() => setConfirmDelete([...selected])}
+            className="mt-2 w-full rounded-lg border border-red-200 bg-red-50 py-2.5 text-xs font-medium text-[#b42318] transition-all active:scale-[0.98] disabled:opacity-40"
+          >
+            🗑 删除所选 {selected.size} 张
+          </button>
         </div>
       )}
 
       {/* 单卡预览 */}
       {preview && (
-        <CardPreview card={preview} mediaUrls={mediaUrls} onClose={() => setPreview(null)} />
+        <CardPreview
+          card={preview}
+          mediaUrls={mediaUrls}
+          onClose={() => setPreview(null)}
+          onEdit={() => {
+            const id = preview.id
+            setPreview(null)
+            onEditCard(id)
+          }}
+        />
       )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title={`删除 ${confirmDelete?.length ?? 0} 张卡片？`}
+        message={`${
+          (confirmDelete?.length ?? 0) === 1 ? '这张卡片' : `这 ${confirmDelete?.length ?? 0} 张卡片`
+        }及其学习进度会被永久删除，只被它们使用的图片也会一并从媒体库移除。此操作不可撤销。`}
+        confirmText="删除"
+        danger
+        onCancel={() => setConfirmDelete(null)}
+        onConfirm={() => void runDelete()}
+      />
     </div>
   )
 }
@@ -304,6 +353,7 @@ function CardRow({
   status,
   onToggle,
   onPreview,
+  onDelete,
 }: {
   card: BrandkiCard
   checked: boolean
@@ -311,6 +361,7 @@ function CardRow({
   status: { label: string; cls: string }
   onToggle: () => void
   onPreview: () => void
+  onDelete: () => void
 }) {
   return (
     <Card className="flex items-center gap-3 p-2.5">
@@ -350,6 +401,14 @@ function CardRow({
         </div>
         <span className="shrink-0 pr-1 text-stone-300">›</span>
       </button>
+      <button
+        onClick={onDelete}
+        title="删除这张卡"
+        aria-label="删除这张卡"
+        className="shrink-0 rounded-lg p-2 text-base text-stone-300 transition-colors hover:bg-red-50 hover:text-[#b42318]"
+      >
+        🗑
+      </button>
     </Card>
   )
 }
@@ -358,10 +417,12 @@ function CardPreview({
   card,
   mediaUrls,
   onClose,
+  onEdit,
 }: {
   card: BrandkiCard
   mediaUrls: Record<string, string>
   onClose: () => void
+  onEdit: () => void
 }) {
   const [flipped, setFlipped] = useState(false)
   const front = remapMedia(renderFront(card.qfmt, card.fields), mediaUrls)
@@ -387,9 +448,12 @@ function CardPreview({
           </div>
         </div>
       </div>
-      <div className="px-4 pb-4">
-        <Button variant="secondary" className="w-full" onClick={() => setFlipped((v) => !v)}>
+      <div className="flex gap-2.5 px-4 pb-4">
+        <Button variant="secondary" className="flex-1" onClick={() => setFlipped((v) => !v)}>
           {flipped ? '看正面' : '翻面看答案'}
+        </Button>
+        <Button variant="primary" className="flex-1" onClick={onEdit}>
+          ✏️ 编辑这张卡
         </Button>
       </div>
     </Modal>
