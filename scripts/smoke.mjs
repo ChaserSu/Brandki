@@ -108,6 +108,30 @@ try {
   assert(roundtrip.media.size === 2, '备份媒体完整')
   assert(Object.keys(roundtrip.progress.states).length === 2, '备份进度完整')
 
+  console.log('\n[6] apkg 导出往返')
+  const apkgBlob = await apkgMod.buildApkg(deck, media, p)
+  const apkgRt = await apkgMod.parsePackage(await apkgBlob.arrayBuffer())
+  assert(apkgRt.deck.cards.length === 2, '导出的 apkg 重新解析得到 2 张卡')
+  assert(apkgRt.media.size === 2, '导出的 apkg 媒体完整')
+  assert(!!apkgRt.deck.models && Object.keys(apkgRt.deck.models).length === 1, '导出的 apkg 含 1 个笔记模型')
+  assert(apkgRt.deck.cards[0].fields['Front']?.includes('<img'), '导出的 apkg 卡片正面仍含图片')
+  assert(apkgRt.deck.cards[0].fields['中文名'] === card0.fields['中文名'], '导出的 apkg 字段内容一致')
+  assert(Object.keys(apkgRt.progress.states).length === 2, '导出的 apkg 调度状态近似保留（2 条）')
+
+  console.log('\n[7] AI 提示词与标签')
+  const aiMod = await server.ssrLoadModule('/src/lib/ai.ts')
+  const prompt = aiMod.buildPrompt('', [
+    { key: 'r-cn', label: '品牌名（中文）', value: '' },
+    { key: aiMod.TAG_FIELD_KEY, label: aiMod.TAG_FIELD_LABEL, value: '咖啡 连锁' },
+  ])
+  assert(prompt.includes(aiMod.TAG_FIELD_LABEL), '提示词属性列表包含标签项')
+  assert(prompt.includes('咖啡 连锁'), '已有标签作为提示词线索传入')
+  assert(prompt.includes('新城集团 260901 版本业态分类规则'), '默认提示词含业态分类参考')
+  assert(aiMod.BUSINESS_TAXONOMY.length === 151, `业态分类 151 条（实际 ${aiMod.BUSINESS_TAXONOMY.length}）`)
+  assert(aiMod.DEFAULT_AI_PROMPT.includes('{{属性列表}}'), '默认提示词仍含 {{属性列表}} 变量')
+  const tags = aiMod.parseAITags('#咖啡, 高端  连锁、咖啡')
+  assert(JSON.stringify(tags) === JSON.stringify(['咖啡', '高端', '连锁']), `标签切分/去 #/去重（${tags.join('/')}）`)
+
   console.log(failures === 0 ? '\n✅ 全部通过\n' : `\n❌ ${failures} 项失败\n`)
 } finally {
   await server.close()

@@ -16,10 +16,14 @@ export function Home({
   onStudy,
   onBrowse,
   onSettings,
+  onEntry,
+  onBatchEntry,
 }: {
   onStudy: (cfg: StudyConfig) => void
   onBrowse: () => void
   onSettings: () => void
+  onEntry: () => void
+  onBatchEntry: () => void
 }) {
   const { deck, progress, settings, exportBackup, resetProgress, reseedSample } = useStore()
   const [importOpen, setImportOpen] = useState(false)
@@ -119,6 +123,22 @@ export function Home({
               badge={dueTotal > 0 ? `${dueTotal} 张待复习` : '已清空'}
               onClick={() => dueTotal > 0 && onStudy({ mode: 'review' })}
               disabled={dueTotal === 0}
+            />
+          </div>
+
+          {/* 手动录入 */}
+          <div className="mt-3 grid grid-cols-2 gap-2.5">
+            <ActionCard
+              icon="📸"
+              title="单张录入"
+              desc="拍一张门店照，AI 识别后生成一张卡"
+              onClick={onEntry}
+            />
+            <ActionCard
+              icon="🗂"
+              title="批量录入"
+              desc="一次选多张照片，批量 AI 补全，挑好再入库"
+              onClick={onBatchEntry}
             />
           </div>
 

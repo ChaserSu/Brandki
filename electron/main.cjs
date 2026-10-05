@@ -67,6 +67,24 @@ ipcMain.handle('fs:listFiles', async (_e, parts) => {
   }
 })
 
+ipcMain.handle('fs:listDirs', async (_e, parts) => {
+  try {
+    const entries = await fs.readdir(safeJoin(parts), { withFileTypes: true })
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name)
+  } catch {
+    return []
+  }
+})
+
+ipcMain.handle('fs:deleteFile', async (_e, parts) => {
+  try {
+    await fs.unlink(safeJoin(parts))
+  } catch (err) {
+    // 文件不存在不算错误；其余错误（如路径是目录）抛出
+    if (err && err.code !== 'ENOENT') throw err
+  }
+})
+
 ipcMain.handle('fs:readBlob', async (_e, parts) => {
   try {
     const data = await fs.readFile(safeJoin(parts))
@@ -80,6 +98,28 @@ ipcMain.handle('fs:writeBlob', async (_e, parts, buffer) => {
   const p = safeJoin(parts)
   await fs.mkdir(path.dirname(p), { recursive: true })
   await fs.writeFile(p, Buffer.from(buffer))
+})
+
+// ---------- AI 请求代理（绕过浏览器 CORS，apiKey 不经过任何第三方） ----------
+
+ipcMain.handle('ai:request', async (_e, { url, method, headers, body, timeoutMs }) => {
+  if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('AI 地址必须是 http(s) URL')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Math.min(Number(timeoutMs) || 90000, 120000))
+  try {
+    const resp = await fetch(url, {
+      method: method || 'POST',
+      headers: headers || {},
+      body: body ?? undefined,
+      signal: controller.signal,
+    })
+    const text = await resp.text()
+    return { status: resp.status, ok: resp.ok, body: text }
+  } catch (err) {
+    return { status: 0, ok: false, body: String(err && err.message ? err.message : err) }
+  } finally {
+    clearTimeout(timer)
+  }
 })
 
 ipcMain.handle('app:getSavePath', () => getSaveDir())
