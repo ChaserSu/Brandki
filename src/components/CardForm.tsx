@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { autofillFields, fileToDataUrl, isAIConfigured, parseAITags, TAG_FIELD_KEY, TAG_FIELD_LABEL } from '../lib/ai'
 import { useStore } from '../lib/store'
 import { Button, Card } from './ui'
@@ -46,6 +46,8 @@ export interface CardFormPayload {
   fieldValues: Record<string, string>
   deckPath: string
   tags: string[]
+  /** 提交时的完整属性行（含自定义属性的增删改名），供父组件原样回写草稿 */
+  rows: FieldRow[]
 }
 
 export interface CardFormInitial {
@@ -113,6 +115,15 @@ export function CardForm({
     () => rows.filter((r) => (r.builtin || r.key.trim()) && r.key !== 'Front').length,
     [rows],
   )
+
+  // 卸载时释放预览 URL（此前只在替换/重置时释放，导致组件卸载后泄漏）
+  const previewRef = useRef(preview)
+  previewRef.current = preview
+  useEffect(() => {
+    return () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current)
+    }
+  }, [])
 
   const pickFile = (f: File | null) => {
     if (!f) return
@@ -263,7 +274,7 @@ export function CardForm({
     }
 
     try {
-      const payload = { file, fieldValues, deckPath, tags }
+      const payload = { file, fieldValues, deckPath, tags, rows }
       await onSubmit(payload)
       const brand = fieldValues['中文名'] || fieldValues['英文名'] || '新品牌'
       if (onSaved) {

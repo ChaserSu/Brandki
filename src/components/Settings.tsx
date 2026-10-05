@@ -78,9 +78,19 @@ export function Settings({ onBack, onEditPrompt }: { onBack: () => void; onEditP
               value={custom}
               onChange={(e) => {
                 const v = e.target.value
-                setCustom(v)
+                if (v === '') {
+                  setCustom('')
+                  return
+                }
                 const n = Number(v)
-                if (v && n >= 1) void setBatch(Math.min(200, n))
+                if (!Number.isFinite(n) || n < 1) {
+                  setCustom(v)
+                  return
+                }
+                // 回写夹紧后的值，避免输入框显示与实际保存的张数不一致
+                const clamped = Math.min(200, Math.floor(n))
+                setCustom(String(clamped))
+                void setBatch(clamped)
               }}
               placeholder="其他"
               className="w-full bg-transparent text-center text-sm outline-none placeholder:text-stone-400"

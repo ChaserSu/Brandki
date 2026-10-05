@@ -21,8 +21,15 @@ export function Welcome({ onDone }: { onDone: () => void }) {
     const size = custom ? Math.max(1, Math.min(200, Number(custom) || batch)) : batch
     setSaving(true)
     // 欢迎页每次启动都会出现，这里只记住每轮张数
-    await updateSettings({ batchSize: size })
-    onDone()
+    try {
+      await updateSettings({ batchSize: size })
+    } catch (err) {
+      // 设置写盘失败不应把用户永久卡在欢迎页
+      console.error('[brandki] 保存每轮张数失败', err)
+    } finally {
+      setSaving(false)
+      onDone()
+    }
   }
 
   return (

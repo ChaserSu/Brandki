@@ -34,7 +34,7 @@ const BATCH_ACTIONS: { status: Grade | 'mastered'; label: string; cls: string }[
 ]
 
 function firstImage(card: BrandkiCard, mediaUrls: Record<string, string>): string | null {
-  const m = /<img[^>]*\ssrc="([^"]+)"/i.exec(card.fields['Front'] ?? '')
+  const m = /<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i.exec(card.fields['Front'] ?? '')
   if (!m) return null
   const filename = m[1].split('/').pop() ?? m[1]
   return mediaUrls[filename] ?? mediaUrls[m[1]] ?? null
@@ -121,9 +121,14 @@ export function Browse({ onBack, onEditCard }: { onBack: () => void; onEditCard:
   const runBatch = async (status: Grade | 'mastered') => {
     if (selected.size === 0) return
     setBusy(true)
-    await batchSetStatus([...selected], status)
-    setSelected(new Set())
-    setBusy(false)
+    try {
+      await batchSetStatus([...selected], status)
+      setSelected(new Set())
+    } catch (err) {
+      console.error('[brandki] 批量操作失败', err)
+    } finally {
+      setBusy(false) // 必须复位，否则写盘异常会让底栏按钮永久禁用
+    }
   }
 
   /** 执行删除（单卡与批量共用）：清空选中、关掉正在预览的卡 */
@@ -140,6 +145,8 @@ export function Browse({ onBack, onEditCard }: { onBack: () => void; onEditCard:
         return next
       })
       setPreview((p) => (p && ids.includes(p.id) ? null : p))
+    } catch (err) {
+      console.error('[brandki] 删除失败', err)
     } finally {
       setBusy(false)
     }

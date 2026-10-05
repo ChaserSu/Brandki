@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../lib/store'
 import {
   applyGrade,
@@ -58,27 +58,39 @@ export function Study({ config, onExit }: { config: StudyConfig; onExit: () => v
 
   const previews = useMemo(() => (current ? gradePreviews(current.state) : []), [current])
 
+  // 防止同一渲染帧内重复评分（键盘连发/极快双击）导致进度覆盖与跳卡
+  const advancingRef = useRef(false)
+  useEffect(() => {
+    advancingRef.current = false
+  }, [queue])
+
   const advance = useCallback(
     async (action: Grade | 'mastered') => {
-      if (!current) return
-      await patchProgress((p) => {
-        if (action === 'mastered') {
-          markMastered(p, current.card.id)
-          setMasteredCount((n) => n + 1)
-        } else {
-          const { next, log } = applyGrade(current.card.id, current.state, action)
-          p.states[current.card.id] = next
-          if (!p.logs.some((l) => l.id === log.id)) p.logs.push(log)
-        }
-      })
-      setQueue((q) => {
-        const [head, ...rest] = q
-        if (action === 1) return [...rest, head]
-        return rest
-      })
-      setDone((d) => d + 1)
-      if (action === 1) setAgains((a) => a + 1)
-      setFlipped(false)
+      if (!current || advancingRef.current) return
+      advancingRef.current = true
+      try {
+        await patchProgress((p) => {
+          if (action === 'mastered') {
+            markMastered(p, current.card.id)
+            setMasteredCount((n) => n + 1)
+          } else {
+            const { next, log } = applyGrade(current.card.id, current.state, action)
+            p.states[current.card.id] = next
+            if (!p.logs.some((l) => l.id === log.id)) p.logs.push(log)
+          }
+        })
+        setQueue((q) => {
+          const [head, ...rest] = q
+          if (action === 1) return [...rest, head]
+          return rest
+        })
+        setDone((d) => d + 1)
+        if (action === 1) setAgains((a) => a + 1)
+        setFlipped(false)
+      } catch (err) {
+        advancingRef.current = false
+        console.error('[brandki] 评分失败', err)
+      }
     },
     [current, patchProgress],
   )

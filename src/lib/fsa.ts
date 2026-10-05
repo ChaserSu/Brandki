@@ -77,7 +77,13 @@ export async function writeJSON(root: AnyFS, path: string[], data: unknown): Pro
 export async function readJSON<T>(root: AnyFS, path: string[]): Promise<T | null> {
   const text = await readText(root, path)
   if (text === null) return null
-  return JSON.parse(text) as T
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    // 文件存在但内容损坏：按「无数据」处理，避免整个应用卡死
+    console.warn('[brandki] 忽略损坏的 JSON 存档：', path.join('/'))
+    return null
+  }
 }
 
 /** 列出某目录下的文件名 */
@@ -170,6 +176,8 @@ export async function ensureStructure(root: AnyFS): Promise<void> {
 
 /** 清空全部存档（危险操作，仅调试/重置用） */
 export async function wipe(root: AnyFS): Promise<void> {
+  if (native) throw new Error('桌面端不支持一键清空存档')
+  if (!root || typeof root.entries !== 'function') return
   for await (const [, handle] of root.entries()) {
     await handle.remove({ recursive: true })
   }

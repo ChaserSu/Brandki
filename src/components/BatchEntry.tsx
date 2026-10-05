@@ -82,12 +82,15 @@ export function BatchEntry({ onBack, onSettings }: { onBack: () => void; onSetti
     })
   }, [])
 
-  // 清理预览 URL
+  // 清理预览 URL：用 ref 跟踪最新草稿，避免卸载时闭包捕获初始空数组导致泄漏
+  const draftsRef = useRef<DraftCard[]>([])
+  draftsRef.current = drafts
+  const mountedRef = useRef(true)
   useEffect(() => {
     return () => {
-      for (const d of drafts) URL.revokeObjectURL(d.previewUrl)
+      mountedRef.current = false
+      for (const d of draftsRef.current) URL.revokeObjectURL(d.previewUrl)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const updateDraft = useCallback((id: string, patch: Partial<DraftCard>) => {
@@ -136,6 +139,7 @@ export function BatchEntry({ onBack, onSettings }: { onBack: () => void; onSetti
     let done = 0
     // 串行请求，避免同时发太多导致限流或 token 超限
     for (const d of targets) {
+      if (!mountedRef.current) return // 已离开页面：停止继续消耗 AI 配额
       updateDraft(d.id, { aiStatus: 'running', aiError: undefined })
       try {
         const image = await fileToDataUrl(d.file)
@@ -368,11 +372,16 @@ export function BatchEntry({ onBack, onSettings }: { onBack: () => void; onSetti
                   ? { label: 'AI 失败', cls: 'bg-red-50 text-red-600' }
                   : null
           return (
-            <button
+            <div
               key={d.id}
+              role="button"
+              tabIndex={0}
               onClick={() => setEditingId(d.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') setEditingId(d.id)
+              }}
               className={cn(
-                'relative flex flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-white text-left shadow-[0_1px_3px_rgba(28,25,23,0.05)] transition-all',
+                'relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-stone-200/80 bg-white text-left shadow-[0_1px_3px_rgba(28,25,23,0.05)] transition-all',
                 isSelected ? 'ring-2 ring-brand ring-offset-1' : '',
               )}
             >
@@ -425,7 +434,7 @@ export function BatchEntry({ onBack, onSettings }: { onBack: () => void; onSetti
                   </div>
                 )}
               </div>
-            </button>
+            </div>
           )
         })}
       </div>
@@ -446,23 +455,14 @@ export function BatchEntry({ onBack, onSettings }: { onBack: () => void; onSetti
                 // 不做真正的写入，实际保存在 onSaved 回调里
               }}
               onSaved={(payload) => {
-                // 把 payload 转回到 rows
-                const nextRows: FieldRow[] = editingDraft.rows.map((r) => {
-                  if (r.key === DECK_PATH_KEY) return { ...r, value: payload.deckPath }
-                  const name = r.custom ? r.key.trim() : r.key
-                  if (name && payload.fieldValues[name] !== undefined) {
-                    return { ...r, value: payload.fieldValues[name] }
-                  }
-                  return r
-                })
-                // 如果有新文件，更新预览
+                // 直接采用表单提交的完整行，保留自定义属性的新增/删除/改名
                 let nextPreview = editingDraft.previewUrl
                 if (payload.file) {
                   URL.revokeObjectURL(editingDraft.previewUrl)
                   nextPreview = URL.createObjectURL(payload.file)
                 }
                 updateDraft(editingDraft.id, {
-                  rows: nextRows,
+                  rows: payload.rows,
                   tags: payload.tags,
                   file: payload.file ?? editingDraft.file,
                   previewUrl: nextPreview,

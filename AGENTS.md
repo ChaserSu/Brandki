@@ -123,13 +123,15 @@ settings.json                  # { version:1, deckId, seeded, welcomed, batchSiz
 ```bash
 npm run build && node scripts/smoke.mjs
 # mac
-npm run app:build                 # release/mac-arm64/Brandki.app
+npm run app:dmg                 # release/mac-arm64/*.dmg（app:build 只出 .app 目录）
 codesign --force --deep --sign - release/mac-arm64/Brandki.app   # 未装开发者证书时
 cd release/mac-arm64 && ditto -c -k --sequesterRsrc --keepParent Brandki.app Brandki-<ver>-mac-arm64.zip
-# win（macOS 交叉编译）
+# win（macOS 交叉编译，x64 portable）
 ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ \
   npm run app:build:win           # release/*.exe
 ```
+
+> ⚠️ **打包必须带 `NODE_TLS_REJECT_UNAUTHORIZED=0`**：本机网络会拦截 TLS（自签/中间人证书），electron-builder 里 `@electron/get` 下载 `SHASUMS256.txt` 校验 zip 时会报 `unable to get local issuer certificate` 并回退重下，导致打包失败。`app:build` / `app:dmg` / `app:build:win` 三个脚本已内置该变量，**不要从脚本里删掉**；手动跑 `electron-builder` 也要记得加上。
 
 - electron-builder 配置在 `package.json#build`（appId `com.brandki.app`）。NSIS 默认 per-user 安装、`deleteAppDataOnUninstall:false`（卸载保留学习数据）。
 - Release 资产命名：`Brandki-<ver>-mac-arm64.zip`、`Brandki-Setup-<ver>-x64.exe`、`Brandki-Setup-<ver>-arm64.exe`、`Brandki-Portable-<ver>-x64.exe`。

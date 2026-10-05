@@ -30,6 +30,7 @@ export function Home({
   const [catOpen, setCatOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmReseed, setConfirmReseed] = useState(false)
 
   const counts = useMemo(
     () => (deck ? countDue(deck.cards, progress) : { newCount: 0, learningCount: 0, reviewCount: 0, masteredCount: 0, total: 0 }),
@@ -77,7 +78,7 @@ export function Home({
                   <MenuItem onClick={() => { void exportBackup(); setMenuOpen(false) }} disabled={!deck}>
                     💾 导出备份
                   </MenuItem>
-                  <MenuItem onClick={() => { void reseedSample(); setMenuOpen(false) }}>🔄 恢复示例牌组</MenuItem>
+                  <MenuItem onClick={() => { setConfirmReseed(true); setMenuOpen(false) }}>🔄 恢复示例牌组</MenuItem>
                   <MenuItem
                     danger
                     disabled={Object.keys(progress.states).length + Object.keys(progress.mastered).length === 0}
@@ -211,6 +212,19 @@ export function Home({
         onConfirm={() => {
           setConfirmClear(false)
           void resetProgress()
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmReseed}
+        title="恢复示例牌组？"
+        message="将用内置示例牌组替换当前牌组，并清空全部学习进度与已录入的卡片。此操作不可撤销，建议先导出备份。"
+        confirmText="恢复"
+        danger
+        onCancel={() => setConfirmReseed(false)}
+        onConfirm={() => {
+          setConfirmReseed(false)
+          void reseedSample()
         }}
       />
     </div>

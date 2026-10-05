@@ -3,6 +3,22 @@
 所有值得注意的变更都会记录在这个文件里。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.5] — 2026-10-06
+
+> 本次更新**仅为 bug 修复**，无新功能、无界面改动、存档格式不变，可直接覆盖升级。
+
+### 🐛 修复
+
+- **进度落盘竞态**：防抖定时器未在直接写盘前清除、应用退出前不冲刷，可能被旧快照覆盖或丢失最近评分（`store.tsx`）。
+- **学习页评分竞态**：快速连点评分按钮导致同一张卡重复评分、队列跳卡（`Study.tsx`）。
+- **媒体引用识别不全**：清理存储空间时单双引号图片、`[sound:]` 音视频引用未识别，可能误删在用媒体（`store.tsx`）。
+- **存档损坏卡死**：`fsa.readJSON` 未捕获解析异常，progress/settings 损坏时应用初始化卡死（`fsa.ts`）。
+- **模板渲染**：支持反向条件块 `{{^字段}}`、嵌套条件块与字段修饰符，修复此类模板卡片显示为空（`template.ts`）。
+- **apkg 导入/导出**：导入忽略 `queue` 字段，挂起/埋藏卡被当作正常卡导入；导出 due 日期与排序字段对齐问题（`apkg.ts`）。
+- **Electron 安全加固**：`safeJoin` 改用 `path.relative` 判定防路径穿越；AI 请求代理拦截内网地址并拒绝跟随重定向（防 SSRF）；限制窗口只打开 http(s) 链接；存档文件原子写入防写盘损坏（`electron/main.cjs`）。
+- **UI 修复**：恢复示例牌组增加二次确认（`Home.tsx`）；批量录入/卡片表单预览 URL 泄漏（`BatchEntry.tsx`、`CardForm.tsx`）；牌库批量操作异常导致按钮永久禁用（`Browse.tsx`）；导入对话框文件选择竞态与定时器清理（`ImportDialog.tsx`）；设置保存失败提示（`Welcome.tsx`）；自定义每轮张数显示不一致（`Settings.tsx`）。
+- **构建**：打包脚本内置 `NODE_TLS_REJECT_UNAUTHORIZED=0`，修复本机 TLS 拦截导致 electron-builder 校验下载失败、打包中断的问题。
+
 ## [0.2.0] — 2026-10-05
 
 ### ✨ 新功能

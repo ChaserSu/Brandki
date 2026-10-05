@@ -30,9 +30,17 @@ protocol.registerSchemesAsPrivileged([
 
 function safeJoin(parts) {
   const root = getSaveDir()
-  const p = path.join(root, ...parts.map((s) => String(s)))
-  if (!p.startsWith(root)) throw new Error('非法路径')
+  const p = path.resolve(root, ...parts.map((s) => String(s)))
+  const rel = path.relative(root, p)
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('非法路径')
   return p
+}
+
+/** 先写临时文件再 rename，避免写入中断留下半截 JSON */
+async function writeFileAtomic(p, data) {
+  const tmp = `${p}.tmp-${process.pid}-${Date.now()}`
+  await fs.writeFile(tmp, data)
+  await fs.rename(tmp, p)
 }
 
 async function ensureDir(parts) {
@@ -47,15 +55,17 @@ ipcMain.handle('fs:ensureStructure', async () => {
 ipcMain.handle('fs:readText', async (_e, parts) => {
   try {
     return await fs.readFile(safeJoin(parts), 'utf8')
-  } catch {
-    return null
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return null
+    // 非「文件不存在」的读取失败必须抛出，否则会被上层当作空数据覆盖真实存档
+    throw err
   }
 })
 
 ipcMain.handle('fs:writeText', async (_e, parts, content) => {
   const p = safeJoin(parts)
   await fs.mkdir(path.dirname(p), { recursive: true })
-  await fs.writeFile(p, content, 'utf8')
+  await writeFileAtomic(p, content)
 })
 
 ipcMain.handle('fs:listFiles', async (_e, parts) => {
@@ -97,22 +107,42 @@ ipcMain.handle('fs:readBlob', async (_e, parts) => {
 ipcMain.handle('fs:writeBlob', async (_e, parts, buffer) => {
   const p = safeJoin(parts)
   await fs.mkdir(path.dirname(p), { recursive: true })
-  await fs.writeFile(p, Buffer.from(buffer))
+  await writeFileAtomic(p, Buffer.from(buffer))
 })
 
 // ---------- AI 请求代理（绕过浏览器 CORS，apiKey 不经过任何第三方） ----------
 
+/** 拦截回环/内网/链路本地地址，避免 AI 代理被用作 SSRF 跳板 */
+function isBlockedHost(hostname) {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h.endsWith('.localhost') || h === '0.0.0.0' || h === '::1' || h === '::') return true
+  if (/^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true
+  return false
+}
+
 ipcMain.handle('ai:request', async (_e, { url, method, headers, body, timeoutMs }) => {
-  if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('AI 地址必须是 http(s) URL')
+  let parsed
+  try {
+    parsed = new URL(String(url || ''))
+  } catch {
+    throw new Error('AI 地址无效')
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('AI 地址必须是 http(s) URL')
+  if (isBlockedHost(parsed.hostname)) throw new Error('不允许访问本机或内网地址')
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), Math.min(Number(timeoutMs) || 90000, 120000))
   try {
-    const resp = await fetch(url, {
+    const resp = await fetch(parsed.href, {
       method: method || 'POST',
       headers: headers || {},
       body: body ?? undefined,
       signal: controller.signal,
+      redirect: 'manual', // 禁止跟随重定向，防止被 302 引向内网
     })
+    if (resp.status >= 300 && resp.status < 400) {
+      return { status: resp.status, ok: false, body: '服务端返回了重定向，已拒绝跟随' }
+    }
     const text = await resp.text()
     return { status: resp.status, ok: resp.ok, body: text }
   } catch (err) {
@@ -136,9 +166,11 @@ function registerAppProtocol() {
   protocol.handle('app', async (request) => {
     const url = new URL(request.url)
     // app://bundle/index.html -> dist/index.html
+    const distRoot = path.resolve(DIST_DIR)
     const segments = url.hostname === 'bundle' ? url.pathname.slice(1) : ''
-    const filePath = path.join(DIST_DIR, segments || 'index.html')
-    if (!filePath.startsWith(DIST_DIR)) return new Response('Not found', { status: 404 })
+    const filePath = path.resolve(distRoot, segments || 'index.html')
+    const rel = path.relative(distRoot, filePath)
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return new Response('Not found', { status: 404 })
     try {
       const data = await fs.readFile(filePath)
       const ext = path.extname(filePath).toLowerCase()
@@ -162,9 +194,14 @@ function registerAppProtocol() {
       }
       return new Response(data, { headers: { 'content-type': types[ext] ?? 'application/octet-stream' } })
     } catch {
-      // 单页应用回退
-      const index = await fs.readFile(path.join(DIST_DIR, 'index.html'))
-      return new Response(index, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      // 静态资源缺失返回 404（避免以 HTML 200 误导排查）；仅无扩展名的路由回退到单页入口
+      if (path.extname(filePath)) return new Response('Not found', { status: 404 })
+      try {
+        const index = await fs.readFile(path.join(distRoot, 'index.html'))
+        return new Response(index, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+      } catch {
+        return new Response('Not found', { status: 404 })
+      }
     }
   })
 }
@@ -185,13 +222,11 @@ function createWindow() {
     },
   })
 
-  // 外链交给系统浏览器
+  // 外链交给系统浏览器；其余协议（file/data/javascript 等）一律拒绝，
+// 避免子窗口继承 preload 后获得存档读写能力
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('http')) {
-      void shell.openExternal(url)
-      return { action: 'deny' }
-    }
-    return { action: 'allow' }
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+    return { action: 'deny' }
   })
 
   // 便于打包后冒烟验证：把渲染进程日志带到主进程 stdout

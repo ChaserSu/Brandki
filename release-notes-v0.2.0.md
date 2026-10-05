@@ -25,9 +25,7 @@
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| macOS (Apple Silicon) | `Brandki-0.2.0-mac-arm64.dmg` / `.zip` | DMG 双击安装 / zip 解压即用 |
-| Windows x64 | `Brandki-Setup-0.2.0-x64.exe` | 安装版，不需管理员权限 |
-| Windows ARM64 | `Brandki-Setup-0.2.0-arm64.exe` | 骁龙本等 ARM 设备 |
-| Windows x64 免安装 | `Brandki-Portable-0.2.0-x64.exe` | 单文件绿色版 |
+| macOS (Apple Silicon) | `Brandki-0.2.0-mac-arm64.zip` | 解压后把 Brandki.app 拖入「应用程序」 |
+| Windows x64 免安装 | `Brandki-Portable-0.2.0-x64.exe` | 单文件绿色版，即开即用 |
 
 > 未做苹果公证 / Windows 代码签名。macOS 首次打开：右键 app → 打开 → 打开。Windows：SmartScreen 点「更多信息 → 仍要运行」。

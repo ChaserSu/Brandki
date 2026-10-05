@@ -240,6 +240,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [mediaUrls, setMediaUrls] = useState<Record<string, string>>({})
   const rootRef = useRef<Folder | null>(null)
   const saveTimer = useRef<number | null>(null)
+  const pendingProgress = useRef<ProgressFile | null>(null)
 
   const revokeMedia = useCallback((urls: Record<string, string>) => {
     for (const u of Object.values(urls)) URL.revokeObjectURL(u)
@@ -293,27 +294,63 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const init = useCallback(async () => {
     if (!supported) return
-    const root = await fsa.getRoot()
-    rootRef.current = root
-    await fsa.ensureStructure(root)
-    let s = { ...DEFAULT_SETTINGS, ...((await fsa.readJSON<SettingsFile>(root, ['settings.json'])) ?? {}) }
-    s = await seedIfNeeded(root, s)
-    setSettings(s)
-    await loadAll(root, s)
-    setStatus('ready')
+    try {
+      const root = await fsa.getRoot()
+      rootRef.current = root
+      await fsa.ensureStructure(root)
+      let s = { ...DEFAULT_SETTINGS, ...((await fsa.readJSON<SettingsFile>(root, ['settings.json'])) ?? {}) }
+      s = await seedIfNeeded(root, s)
+      setSettings(s)
+      await loadAll(root, s)
+    } catch (err) {
+      // 存档损坏 / 存储不可用：不让应用永久卡在 loading，降级为空存档并放行
+      console.error('[brandki] 初始化存档失败', err)
+    } finally {
+      setStatus('ready')
+    }
   }, [supported, seedIfNeeded, loadAll])
 
   useEffect(() => {
     void init()
   }, [init])
 
+  /** 丢弃尚未落盘的防抖进度（随后会由直接写盘写入权威数据） */
+  const cancelPendingSave = useCallback(() => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    saveTimer.current = null
+    pendingProgress.current = null
+  }, [])
+
   const scheduleProgressSave = useCallback((p: ProgressFile) => {
     const root = rootRef.current
     if (!root) return
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    pendingProgress.current = p
     saveTimer.current = window.setTimeout(() => {
-      void fsa.writeJSON(root, ['progress.json'], p)
+      saveTimer.current = null
+      const data = pendingProgress.current
+      pendingProgress.current = null
+      if (data) void fsa.writeJSON(root, ['progress.json'], data)
     }, 400)
+  }, [])
+
+  // 退出前冲刷未落盘的进度，避免最后一次评分丢失
+  useEffect(() => {
+    const flush = () => {
+      const root = rootRef.current
+      const data = pendingProgress.current
+      if (!root || !data) return
+      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      saveTimer.current = null
+      pendingProgress.current = null
+      void fsa.writeJSON(root, ['progress.json'], data)
+    }
+    window.addEventListener('beforeunload', flush)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      window.removeEventListener('beforeunload', flush)
+      window.removeEventListener('pagehide', flush)
+    }
   }, [])
 
   const patchProgress = useCallback(
@@ -329,6 +366,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const reseedSample = useCallback(async () => {
     const root = rootRef.current
     if (!root) return
+    cancelPendingSave()
     const resp = await fetch(import.meta.env.BASE_URL + 'sample.apkg')
     const imported = await parsePackage(await resp.arrayBuffer())
     await writeImport(root, imported, newProgress())
@@ -336,12 +374,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await fsa.writeJSON(root, ['settings.json'], s)
     setSettings(s)
     await loadAll(root, s)
-  }, [settings, loadAll])
+  }, [settings, loadAll, cancelPendingSave])
 
   const importFile = useCallback(
     async (file: File, strategy: MergeStrategy) => {
       const root = rootRef.current
       if (!root) throw new Error('本地存档不可用')
+      cancelPendingSave()
       const imported = await parsePackage(await file.arrayBuffer())
       const oldIds = new Set(deck?.cards.map((c) => c.id) ?? [])
       const newIds = new Set(imported.deck.cards.map((c) => c.id))
@@ -359,15 +398,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await loadAll(root, s)
       return diffDecks(oldIds, newIds, imported.progress)
     },
-    [deck, progress, settings, loadAll],
+    [deck, progress, settings, loadAll, cancelPendingSave],
   )
 
   const resetProgress = useCallback(async () => {
     const empty = newProgress()
     setProgress(empty)
+    cancelPendingSave()
     const root = rootRef.current
     if (root) await fsa.writeJSON(root, ['progress.json'], empty)
-  }, [])
+  }, [cancelPendingSave])
 
   const updateSettings = useCallback(
     async (patch: Partial<SettingsFile>) => {
@@ -399,10 +439,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         delete next.mastered[id]
         if (!next.logs.some((l) => l.id === log.id)) next.logs.push(log)
       }
+      cancelPendingSave()
       setProgress(next)
       if (root) await fsa.writeJSON(root, ['progress.json'], next)
     },
-    [deck, progress],
+    [deck, progress, cancelPendingSave],
   )
 
   /** 手动录入一张新品牌卡：写媒体 → 扩展模型 → 追加 note/card → 落盘 */
@@ -606,6 +647,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         delete nextProgress.mastered[id]
       }
       nextProgress.logs = nextProgress.logs.filter((l) => !removeIds.has(l.cardId))
+      cancelPendingSave()
       setProgress(nextProgress)
       await fsa.writeJSON(root, ['progress.json'], nextProgress)
 
@@ -621,7 +663,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setDeck(nextDeck)
       return { removed: removeIds.size, removedMedia: orphaned.length }
     },
-    [deck, progress],
+    [deck, progress, cancelPendingSave],
   )
 
   const exportBackup = useCallback(async () => {
@@ -641,7 +683,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     a.href = URL.createObjectURL(blob)
     a.download = `brandki-backup-${new Date().toISOString().slice(0, 10)}.brandki.zip`
     a.click()
-    URL.revokeObjectURL(a.href)
+    // 延迟释放，避免下载尚未开始读取 Blob URL 就被撤销
+    const url = a.href
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }, [deck, progress])
 
   /**
@@ -664,7 +708,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     a.href = URL.createObjectURL(blob)
     a.download = `${safeName}-${new Date().toISOString().slice(0, 10)}.apkg`
     a.click()
-    URL.revokeObjectURL(a.href)
+    const url = a.href
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }, [deck, progress])
 
   /**

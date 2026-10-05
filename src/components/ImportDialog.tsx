@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../lib/store'
 import { parsePackage } from '../lib/apkg'
 import { diffDecks } from '../lib/merge'
@@ -23,6 +23,14 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
   const [strategy, setStrategy] = useState<MergeStrategy>('merge-old')
   const [phase, setPhase] = useState<'pick' | 'parsed' | 'working' | 'done'>('pick')
   const [error, setError] = useState<string | null>(null)
+  const parseReqRef = useRef(0)
+  const closeTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current)
+    }
+  }, [])
 
   const reset = () => {
     setFile(null)
@@ -39,9 +47,15 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
   }
 
   const onFile = async (f: File) => {
+    const reqId = ++parseReqRef.current
+    // 立即清场，避免上一次解析的残留状态被误导入
     setError(null)
+    setFile(null)
+    setDiff(null)
+    setPhase('pick')
     try {
       const imported = await parsePackage(await f.arrayBuffer())
+      if (reqId !== parseReqRef.current) return // 已有更新的选择，丢弃本次结果
       const oldIds = new Set(deck?.cards.map((c) => c.id) ?? [])
       const newIds = new Set(imported.deck.cards.map((c) => c.id))
       setFile(f)
@@ -49,6 +63,7 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
       setDiff(diffDecks(oldIds, newIds, imported.progress))
       setPhase('parsed')
     } catch (e) {
+      if (reqId !== parseReqRef.current) return
       setError(e instanceof Error ? e.message : '解析失败，请确认是 .apkg 或 .brandki.zip 文件')
     }
   }
@@ -59,7 +74,7 @@ export function ImportDialog({ open, onClose }: { open: boolean; onClose: () => 
     try {
       await importFile(file, strategy)
       setPhase('done')
-      setTimeout(handleClose, 900)
+      closeTimerRef.current = window.setTimeout(handleClose, 900)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setPhase('parsed')

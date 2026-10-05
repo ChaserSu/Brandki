@@ -58,6 +58,7 @@ function parseBrandkiZip(entries: Record<string, Uint8Array>): ImportedDeck {
 /** 把 Anki 的传统调度数据近似映射为 FSRS 卡片状态（快照级，非无损） */
 function ankiSnapshotToState(c: RawCard, crt: number): unknown | null {
   if (c.type === 0) return null // 新卡：没有调度状态
+  if (c.queue < 0) return null // 挂起(-1)/埋藏(-2/-3)：不导入调度状态，避免其「复活」进队列
   if (c.type === 2) {
     // review：due 是相对收藏创建日的天数
     const dueDate = new Date(crt * 1000 + c.due * 86400_000)
@@ -408,6 +409,8 @@ export async function buildApkg(
   db.run(APKG_SCHEMA)
 
   const nowSec = Math.floor(Date.now() / 1000)
+  // Anki 的 review due 是「相对 col.crt 的天数」，crt 取当地午夜才能按天对齐
+  const crtSec = Math.floor(new Date(new Date().setHours(0, 0, 0, 0)).getTime() / 1000)
 
   // 模型 id / 牌组 id 映射（Anki 要求整型 id）
   const modelIdByKey = new Map<string, number>()
@@ -448,7 +451,7 @@ export async function buildApkg(
       css: m.css ?? '',
       latexPre: '\\documentclass[12pt]{article}\n\\special{papersize=3in,5in}\n\\usepackage[utf8]{inputenc}\n\\usepackage{amssymb,amsmath}\n\\pagestyle{empty}\n\\setlength{\\parindent}{0in}\n\\begin{document}\n',
       latexPost: '\\end{document}',
-      req: [[0, 'any', [0]]],
+      req: [...m.tmpls].sort((a, b) => a.ord - b.ord).map((t) => [t.ord, 'any', [t.ord]]),
       tags: [],
       vers: [],
     }
@@ -481,7 +484,7 @@ export async function buildApkg(
   }
 
   db.run('INSERT INTO col VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)', [
-    1, nowSec, nowSec, nowSec, 11, 0, 0, 0,
+    1, crtSec, nowSec, nowSec, 11, 0, 0, 0,
     JSON.stringify(conf), JSON.stringify(modelsJson), JSON.stringify(decksJson), JSON.stringify(dconf), '{}',
   ])
 
@@ -514,7 +517,7 @@ export async function buildApkg(
     const nid = noteIdByGuid.get(c.guid)
     if (!nid) continue
     const did = deckIdByPath.get(c.deckPath?.trim() || 'Default') ?? 1
-    const sched = fsrsToAnkiSched(progress.states[c.id], nowSec, newPos)
+    const sched = fsrsToAnkiSched(progress.states[c.id], crtSec, newPos)
     if (sched.type === 0) newPos++
     const cid = cardSeq++
     cardIdByKey.set(c.id, cid)
